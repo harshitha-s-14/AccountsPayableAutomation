@@ -1,0 +1,42 @@
+# Environment variables and secrets
+.env
+.env.*
+!.env.example
+
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+.pytest_cache/
+.coverage
+
+# Virtual environments
+venv/
+.venv/
+env/
+
+# Django
+staticfiles/
+media/
+*.log
+
+# Frontend
+node_modules/
+dist/
+.vite/
+
+# Backups
+APA_Backup/
+
+# IDE and OS
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+
+# Local database
+backend/db.sqlite3
+
+# Old code backups
+*_before_*.py
