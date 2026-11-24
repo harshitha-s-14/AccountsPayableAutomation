@@ -1,4 +1,25 @@
 from decimal import Decimal
+import re
+
+
+def descriptions_match(description1, description2):
+    def normalize(text):
+        words = re.findall(r"[a-z0-9]+", text.casefold())
+        ignored = {"and", "or", "the", "of", "for", "a", "an"}
+        return set(words) - ignored
+
+    words1 = normalize(description1)
+    words2 = normalize(description2)
+
+    if words1 == words2:
+        return True
+
+    common_words = words1.intersection(words2)
+
+    return (
+        len(common_words) >= 2
+        and len(common_words) / min(len(words1), len(words2)) >= 0.5
+    )
 
 
 def perform_po_matching(invoice, purchase_order, grn=None):
@@ -18,24 +39,30 @@ def perform_po_matching(invoice, purchase_order, grn=None):
 
     results['two_way_matching']['vendor_match'] = vendor_match
 
-    # 2. Invoice and PO amount validation
-    invoice_amount = invoice.total_amount or Decimal('0')
+    # 2. Compare PO amount with invoice line-item subtotal
+    invoice_items = list(invoice.line_items.all())
+    po_items = list(purchase_order.line_items.all())
+
+    invoice_amount = sum(
+        (item.amount for item in invoice_items),
+        Decimal('0')
+    )
+
     po_amount = purchase_order.total_amount or Decimal('0')
 
     amount_difference = abs(invoice_amount - po_amount)
-
     amount_match = amount_difference <= tolerance
 
     results['two_way_matching']['amount_match'] = amount_match
     results['two_way_matching']['amount_difference'] = str(
         amount_difference
     )
+    results['two_way_matching']['invoice_subtotal'] = str(invoice_amount)
+    results['two_way_matching']['po_amount'] = str(po_amount)
 
     # 3. Line-item validation
-    invoice_items = list(invoice.line_items.all())
-    po_items = list(purchase_order.line_items.all())
-
     line_item_checks = []
+    matched_invoice_indexes = set()
 
     if not po_items:
         results['two_way_matching']['line_item_error'] = (
@@ -44,11 +71,20 @@ def perform_po_matching(invoice, purchase_order, grn=None):
 
     for po_item in po_items:
 
-        matching_items = [
-            item for item in invoice_items
-            if item.description.strip().casefold()
-            == po_item.description.strip().casefold()
+        matching_indexes = [
+            index for index, item in enumerate(invoice_items)
+            if index not in matched_invoice_indexes
+            and descriptions_match(
+                item.description,
+                po_item.description
+            )
         ]
+
+        matching_items = [
+            invoice_items[index] for index in matching_indexes
+        ]
+
+        matched_invoice_indexes.update(matching_indexes)
 
         invoice_quantity = sum(
             (item.quantity for item in matching_items),
@@ -79,16 +115,11 @@ def perform_po_matching(invoice, purchase_order, grn=None):
             'matched': quantity_match and item_amount_match
         })
 
-    # Detect invoice items that are not present in the PO
-    po_descriptions = {
-        item.description.strip().casefold()
-        for item in po_items
-    }
-
+    # Detect unmatched invoice items
     extra_invoice_items = [
         item.description
-        for item in invoice_items
-        if item.description.strip().casefold() not in po_descriptions
+        for index, item in enumerate(invoice_items)
+        if index not in matched_invoice_indexes
     ]
 
     results['two_way_matching']['line_item_checks'] = line_item_checks
@@ -119,30 +150,35 @@ def perform_po_matching(invoice, purchase_order, grn=None):
         results['three_way_matching']['grn_match'] = grn_match
 
         quantity_checks = []
-
         grn_items = list(grn.line_items.all())
 
         if grn_match:
 
             for po_item in po_items:
 
+                matching_grn_items = [
+                    item for item in grn_items
+                    if descriptions_match(
+                        item.description,
+                        po_item.description
+                    )
+                ]
+
+                matching_invoice_items = [
+                    item for item in invoice_items
+                    if descriptions_match(
+                        item.description,
+                        po_item.description
+                    )
+                ]
+
                 received_quantity = sum(
-                    (
-                        item.quantity_received
-                        for item in grn_items
-                        if item.description.strip().casefold()
-                        == po_item.description.strip().casefold()
-                    ),
+                    (item.quantity_received for item in matching_grn_items),
                     Decimal('0')
                 )
 
                 billed_quantity = sum(
-                    (
-                        item.quantity
-                        for item in invoice_items
-                        if item.description.strip().casefold()
-                        == po_item.description.strip().casefold()
-                    ),
+                    (item.quantity for item in matching_invoice_items),
                     Decimal('0')
                 )
 
