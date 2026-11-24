@@ -77,11 +77,12 @@ def normalize_date(value):
         '%d %b %Y',
         '%d %B %Y',
         '%b %d %Y',
-        '%B %d %Y'
+        '%B %d %Y',
+        '%d-%b-%Y',
+        '%d-%b-%y'
     ]
 
     for date_format in formats:
-
         try:
             return datetime.strptime(
                 value,
@@ -92,7 +93,6 @@ def normalize_date(value):
             continue
 
     return None
-
 
 def clean_decimal(value):
 
@@ -257,26 +257,36 @@ def extract_invoice_fields(text):
             parts[3]
         )
 
-    # Fallback for values appearing on separate lines
+       # Fallback: extract line items using serial number and row structure
 
-    if not fields["line_items"]:
+    index = 0
 
-        for index in range(len(lines) - 3):
+    while index < len(lines) - 4:
 
-            description = lines[index]
+        serial_number = lines[index]
+        description = lines[index + 1]
+        quantity = lines[index + 2]
+        unit_price = lines[index + 3]
+        amount = lines[index + 4]
 
-            if any(
-                header in description.lower()
-                for header in ignored_headers
-            ):
-                continue
-
+        if (
+            re.fullmatch(r'\d+', serial_number)
+            and description
+            and clean_decimal(quantity) is not None
+            and clean_decimal(unit_price) is not None
+            and clean_decimal(amount) is not None
+        ):
             add_line_item(
                 description,
-                lines[index + 1],
-                lines[index + 2],
-                lines[index + 3]
+                quantity,
+                unit_price,
+                amount
             )
+
+            index += 5
+
+        else:
+            index += 1
 
     # Report missing fields
 
